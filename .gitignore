@@ -38,12 +38,12 @@ env.bak/
 venv.bak/
 
 # Project Specific
-question-1/config.json
-question-1/models/
-!question-1/models/.keep
-question-1/data/vector_store.pkl
-question-1/prompt
-question-1/screenshot
+agent/config.json
+agent/models/
+!agent/models/.keep
+agent/data/vector_store.pkl
+agent/prompt
+agent/screenshot
 
 # Tools
 .mypy_cache/
@@ -55,4 +55,3 @@ htmlcov/
 .cache/
 .npm
 node_modules/
-简历-李杨-北京理工大学-计科-2028届硕士研究生-ver.c.pdf
