@@ -1,0 +1,341 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <title>On-Call Agent v4 (ReAct)</title>
+    <!-- Tailwind CSS (with Dark Mode support) -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+    <!-- Highlight.js for code highlighting -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.8.0/styles/github-dark.min.css">
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.8.0/highlight.min.js"></script>
+    
+    <script>
+        tailwind.config = {
+            darkMode: 'class',
+            theme: {
+                extend: {
+                    colors: {
+                        darkbg: '#0f111a',
+                        darkcard: '#1a1d27',
+                        thoughtbg: '#2d1b4e',
+                        thoughtborder: '#4c2882',
+                        actionbg: '#1e293b',
+                        actionborder: '#334155'
+                    }
+                }
+            }
+        }
+        marked.setOptions({
+            highlight: function(code, lang) {
+                if (lang && hljs.getLanguage(lang)) {
+                    return hljs.highlight(code, { language: lang }).value;
+                }
+                return hljs.highlightAuto(code).value;
+            }
+        });
+    </script>
+    <style>
+        body { font-family: 'Inter', -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; }
+        ::-webkit-scrollbar { width: 6px; }
+        ::-webkit-scrollbar-track { background: transparent; }
+        ::-webkit-scrollbar-thumb { background: #334155; border-radius: 3px; }
+        ::-webkit-scrollbar-thumb:hover { background: #475569; }
+        
+        .thought-bubble {
+            background-color: var(--thoughtbg, rgba(45, 27, 78, 0.4));
+            border: 1px solid var(--thoughtborder, rgba(76, 40, 130, 0.6));
+            box-shadow: 0 4px 15px rgba(0,0,0,0.1);
+        }
+        
+        .markdown-body pre { background: #0d1117; padding: 1rem; border-radius: 0.5rem; overflow-x: auto; margin: 0.5rem 0;}
+        .markdown-body code { background: rgba(255,255,255,0.1); padding: 0.2rem 0.4rem; border-radius: 0.25rem; font-size: 0.875em; }
+        .markdown-body pre code { background: transparent; padding: 0; }
+        .markdown-body p { margin-top: 0; margin-bottom: 0.5rem; }
+        .markdown-body ul { list-style-type: disc; padding-left: 1.5rem; margin-bottom: 0.5rem; }
+        .markdown-body ol { list-style-type: decimal; padding-left: 1.5rem; margin-bottom: 0.5rem; }
+        .markdown-body a { color: #60a5fa; text-decoration: underline; }
+    </style>
+</head>
+<body class="bg-darkbg h-screen flex flex-col text-gray-200 antialiased selection:bg-purple-500/30">
+
+    <!-- Header -->
+    <header class="bg-darkcard border-b border-gray-800 shadow-md shrink-0">
+        <div class="max-w-6xl mx-auto px-6 py-4 flex justify-between items-center">
+            <h1 class="text-xl font-bold flex items-center bg-clip-text text-transparent bg-gradient-to-r from-purple-400 to-blue-400">
+                <svg class="w-6 h-6 mr-3 text-purple-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 10V3L4 14h7v7l9-11h-7z"></path></svg>
+                On-Call ReAct Agent v4
+            </h1>
+            <div class="flex items-center space-x-4">
+                <span class="text-xs font-mono px-2 py-1 rounded bg-gray-800 text-gray-400 border border-gray-700">Reasoning + Acting Loop</span>
+            </div>
+        </div>
+    </header>
+
+    <!-- Main Chat Area -->
+    <main class="flex-1 overflow-hidden flex flex-col max-w-4xl mx-auto w-full relative">
+        <div id="chatBox" class="flex-1 overflow-y-auto p-6 space-y-6 scroll-smooth pb-32">
+            <!-- Initial Greeting -->
+            <div class="flex items-start">
+                <div class="flex-shrink-0 bg-blue-500/20 rounded-xl p-2.5 mt-1 border border-blue-500/30">
+                    <svg class="w-6 h-6 text-blue-400" fill="currentColor" viewBox="0 0 20 20"><path fill-rule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zM9.555 7.168A1 1 0 008 8v4a1 1 0 001.555.832l3-2a1 1 0 000-1.664l-3-2z" clip-rule="evenodd"></path></svg>
+                </div>
+                <div class="ml-4 bg-darkcard border border-gray-700 p-4 rounded-2xl rounded-tl-none shadow-lg max-w-[85%] text-gray-300 text-sm leading-relaxed">
+                    您好！我是集成 ReAct 框架的智能排障助理。我会自行规划排查步骤、调用工具查阅 SOP，并展示完整的思考逻辑（Thought）、动作执行（Action）与结果观测（Observation）。请描述您遇到的问题。
+                </div>
+            </div>
+        </div>
+
+        <!-- Input Area, floating at bottom -->
+        <div class="absolute bottom-6 left-6 right-6">
+            <div class="bg-gray-800/80 backdrop-blur-md rounded-2xl p-2 border border-gray-600 shadow-2xl">
+                <form id="chatForm" class="flex items-end gap-2" onsubmit="sendMessage(event)">
+                    <div class="flex-1 relative">
+                        <textarea id="userInput" rows="1" class="w-full resize-none bg-transparent rounded-xl py-3 px-4 text-gray-200 placeholder-gray-500 focus:outline-none max-h-32 text-sm" placeholder="Ask about system issues, eg: 数据库主从延迟..." onkeydown="handleEnter(event)" oninput="this.style.height = '';this.style.height = Math.min(this.scrollHeight, 128) + 'px'"></textarea>
+                    </div>
+                    <button type="submit" id="sendBtn" class="bg-gradient-to-r from-purple-500 to-blue-600 text-white p-3 rounded-xl hover:from-purple-400 hover:to-blue-500 transition-all shadow-lg flex-shrink-0 mb-1 disabled:opacity-50 disabled:cursor-not-allowed">
+                        <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 19l9 2-9-18-9 18 9-2zm0 0v-8"></path></svg>
+                    </button>
+                </form>
+            </div>
+        </div>
+    </main>
+
+    <!-- JS Logic -->
+    <script>
+        const chatBox = document.getElementById('chatBox');
+        const userInput = document.getElementById('userInput');
+        const sendBtn = document.getElementById('sendBtn');
+        let isReceiving = false;
+        let messageHistory = [];
+
+        function handleEnter(e) {
+            if (e.key === 'Enter' && !e.shiftKey) {
+                e.preventDefault();
+                sendMessage(e);
+            }
+        }
+
+        function toggleObservation(btn) {
+            const container = btn.closest('div.border.border-gray-700');
+            const content = container.querySelector('.obs-body');
+            const icon = btn.querySelector('.chevron-icon');
+            if (content.classList.contains('hidden')) {
+                content.classList.remove('hidden');
+                icon.style.transform = 'rotate(180deg)';
+            } else {
+                content.classList.add('hidden');
+                icon.style.transform = 'rotate(0deg)';
+            }
+        }
+
+        async function sendMessage(e) {
+            if (e) e.preventDefault();
+            if (isReceiving) return;
+            
+            const text = userInput.value.trim();
+            if (!text) return;
+            
+            userInput.value = '';
+            userInput.style.height = 'auto';
+            
+            // Add user bubble
+            const userBox = document.createElement('div');
+            userBox.className = 'flex items-start justify-end mt-4 mb-4';
+            userBox.innerHTML = `
+                <div class="bg-blue-600/90 border border-blue-500/50 text-white p-3.5 rounded-2xl rounded-tr-none shadow-lg max-w-[80%] whitespace-pre-wrap text-sm">${text}</div>
+            `;
+            chatBox.appendChild(userBox);
+            
+            messageHistory.push({ role: 'user', content: text });
+            
+            chatBox.scrollTop = chatBox.scrollHeight;
+            sendBtn.disabled = true;
+            isReceiving = true;
+
+            // Container for this whole turn
+            const turnContainer = document.createElement('div');
+            turnContainer.className = 'flex flex-col space-y-3 bg-darkcard/50 rounded-2xl p-4 border border-gray-800/60 my-6 relative';
+            const agentAvatar = `<div class="absolute -left-6 -top-4 bg-purple-500/20 rounded-xl p-2 border border-purple-500/30 backdrop-blur-sm"><svg class="w-5 h-5 text-purple-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9.663 17h4.673M12 3v1m6.364 1.636l-.707.707M21 12h-1M4 12H3m3.343-5.657l-.707-.707m2.828 9.9a5 5 0 117.072 0l-.548.547A3.374 3.374 0 0014 18.469V19a2 2 0 11-4 0v-.531c0-.895-.356-1.754-.988-2.386l-.548-.547z"></path></svg></div>`;
+            turnContainer.innerHTML = agentAvatar;
+            chatBox.appendChild(turnContainer);
+
+            let activeThoughtBlock = null;
+            let activeThoughtText = "";
+            let activeToolName = "";
+            let activeToolDiv = null;
+
+            try {
+                const response = await fetch('/v4/chat', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ messages: messageHistory })
+                });
+
+                if (!response.ok) throw new Error(`HTTP Error: ${response.status}`);
+
+                const reader = response.body.getReader();
+                const decoder = new TextDecoder("utf-8");
+                let partialChunk = "";
+                let fullAnswerText = "";
+
+                while (true) {
+                    const { done, value } = await reader.read();
+                    if (done) break;
+                    
+                    partialChunk += decoder.decode(value, { stream: true });
+                    const lines = partialChunk.split("\n\n");
+                    partialChunk = lines.pop(); // keep remainder
+
+                    for (const line of lines) {
+                        if (!line.startsWith("data: ")) continue;
+                        const dataStr = line.replace("data: ", "").trim();
+                        if (dataStr === "[DONE]") break;
+                        
+                        try {
+                            const data = JSON.parse(dataStr);
+                            if (data.event === "thought") {
+                                if (!activeThoughtBlock) {
+                                    activeThoughtBlock = document.createElement('div');
+                                    activeThoughtBlock.className = 'thought-bubble p-3 rounded-lg text-sm text-purple-200 shadow-inner flex space-x-3 mb-2 transition-all duration-300 overflow-hidden';
+                                    activeThoughtBlock.innerHTML = `
+                                        <div class="mt-0.5 shrink-0"><svg class="w-4 h-4 text-purple-400 opacity-80" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 10V3L4 14h7v7l9-11h-7z"></path></svg></div>
+                                        <div class="thought-content font-mono whitespace-pre-wrap flex-1 opacity-90 leading-relaxed text-xs"></div>
+                                    `;
+                                    turnContainer.appendChild(activeThoughtBlock);
+                                }
+                                activeThoughtText += data.delta;
+                                activeThoughtBlock.querySelector('.thought-content').textContent = activeThoughtText;
+                                chatBox.scrollTop = chatBox.scrollHeight;
+                            } 
+                            else if (data.event === "tool_call") {
+                                // When a tool is called, we consider the previous thought segment finished.
+                                // We can slightly dim it or just leave it.
+                                if (activeThoughtBlock) {
+                                    activeThoughtBlock.classList.add('opacity-60');
+                                    activeThoughtBlock = null;
+                                }
+                                activeThoughtText = ""; 
+                                
+                                activeToolName = data.toolName;
+                                activeToolDiv = document.createElement('div');
+                                activeToolDiv.className = 'border border-gray-700 bg-gray-800/60 rounded-lg overflow-hidden my-2 shadow-sm';
+                                
+                                // Action Header
+                                const header = document.createElement('div');
+                                header.className = 'bg-gray-800 px-4 py-2 flex items-center justify-between border-b border-gray-700';
+                                header.innerHTML = `
+                                    <div class="flex items-center gap-2 font-mono text-xs text-gray-400">
+                                        <svg class="w-4 h-4 text-blue-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z"></path><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"></path></svg>
+                                        <span class="text-blue-300 font-semibold">${data.toolName}</span>
+                                        <span class="truncate max-w-[200px] opacity-70">${data.arguments}</span>
+                                    </div>
+                                    <div class="tool-spinner flex items-center">
+                                        <svg class="w-4 h-4 animate-spin text-blue-500" fill="none" viewBox="0 0 24 24"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path></svg>
+                                    </div>
+                                `;
+                                activeToolDiv.appendChild(header);
+                                turnContainer.appendChild(activeToolDiv);
+                                chatBox.scrollTop = chatBox.scrollHeight;
+                            }
+                            else if (data.event === "tool_result") {
+                                if (activeToolDiv) {
+                                    const spinnerWrapper = activeToolDiv.querySelector('.tool-spinner');
+                                    spinnerWrapper.innerHTML = `
+                                        <svg class="w-4 h-4 text-green-500 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"></path></svg>
+                                        <button type="button" class="text-xs text-gray-400 hover:text-white transition flex items-center focus:outline-none" onclick="toggleObservation(this)">
+                                            Observation <svg class="w-3 h-3 ml-1 chevron-icon transition-transform" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"></path></svg>
+                                        </button>
+                                    `;
+                                    const obsBody = document.createElement('div');
+                                    obsBody.className = 'obs-body px-4 py-3 bg-[#111827] text-xs font-mono text-gray-300 overflow-hidden hidden whitespace-pre-wrap mt-0 border-t border-gray-700/50';
+                                    obsBody.textContent = data.summary;
+                                    activeToolDiv.appendChild(obsBody);
+                                    activeToolDiv = null;
+                                }
+                            }
+                            else if (data.event === "message_finalized") {
+                                // 1. Find all thought bubbles in this turn
+                                const thoughts = turnContainer.querySelectorAll('.thought-bubble');
+                                if (thoughts.length > 0) {
+                                    // Group them into a collapsable container
+                                    const thoughtWrapper = document.createElement('div');
+                                    thoughtWrapper.className = 'border border-purple-500/30 bg-purple-900/10 rounded-lg mb-4 overflow-hidden';
+                                    
+                                    const thoughtHeader = document.createElement('button');
+                                    thoughtHeader.className = 'w-full px-3 py-2 flex items-center justify-between text-xs text-purple-300/80 hover:bg-purple-900/20 transition-colors';
+                                    thoughtHeader.innerHTML = `
+                                        <span class="flex items-center gap-2 font-medium">
+                                            <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9.663 17h4.673M12 3v1m6.364 1.636l-.707.707M21 12h-1M4 12H3m3.343-5.657l-.707-.707m2.828 9.9a5 5 0 117.072 0l-.548.547A3.374 3.374 0 0014 18.469V19a2 2 0 11-4 0v-.531c0-.895-.356-1.754-.988-2.386l-.548-.547z"></path></svg>
+                                            推理过程 (Thought Process)
+                                        </span>
+                                        <svg class="w-3.5 h-3.5 transition-transform duration-300" style="transform: rotate(180deg)" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"></path></svg>
+                                    `;
+                                    
+                                    const thoughtBody = document.createElement('div');
+                                    thoughtBody.className = 'p-1 bg-black/20'; // Keep it hidden by default if preferred, but usually users want it collapsed after answer
+                                    
+                                    // Move thoughts inside
+                                    thoughts.forEach(t => {
+                                        t.classList.remove('mb-2');
+                                        t.classList.add('my-1', 'bg-transparent', 'border-none', 'shadow-none');
+                                        thoughtBody.appendChild(t);
+                                    });
+                                    
+                                    thoughtHeader.onclick = () => {
+                                        const isHidden = thoughtBody.classList.contains('hidden');
+                                        thoughtBody.classList.toggle('hidden');
+                                        thoughtHeader.querySelector('svg:last-child').style.transform = isHidden ? 'rotate(180deg)' : 'rotate(0deg)';
+                                    };
+                                    
+                                    // Default to collapsed after finalized
+                                    thoughtBody.classList.add('hidden');
+                                    thoughtHeader.querySelector('svg:last-child').style.transform = 'rotate(0deg)';
+
+                                    thoughtWrapper.appendChild(thoughtHeader);
+                                    thoughtWrapper.appendChild(thoughtBody);
+                                    
+                                    // Insert wrap at the beginning of the turn (or where the first thought was)
+                                    turnContainer.insertBefore(thoughtWrapper, turnContainer.firstChild.nextSibling);
+                                }
+
+                                // 2. Add final answer
+                                const finalAnsDiv = document.createElement('div');
+                                finalAnsDiv.className = 'mt-2 text-gray-200 text-sm leading-relaxed markdown-body animate-in fade-in slide-in-from-bottom-2 duration-500';
+                                finalAnsDiv.innerHTML = marked.parse(activeThoughtText);
+                                turnContainer.appendChild(finalAnsDiv);
+                                
+                                fullAnswerText = activeThoughtText;
+                                activeThoughtBlock = null;
+                                chatBox.scrollTop = chatBox.scrollHeight;
+                            }
+                            else if (data.event === "loop_limit" || data.event === "error") {
+                                const errDiv = document.createElement('div');
+                                errDiv.className = 'text-red-400 text-sm mt-3 bg-red-900/20 py-2 px-3 border border-red-900/50 rounded-lg';
+                                errDiv.textContent = `Warning: ${data.detail || data.delta}`;
+                                turnContainer.appendChild(errDiv);
+                            }
+                        } catch (err) {
+                            console.error("Parse JSON stream error:", err, dataStr);
+                        }
+                    }
+                }
+                
+                if (fullAnswerText) {
+                    messageHistory.push({ role: 'assistant', content: fullAnswerText });
+                }
+                
+            } catch (err) {
+                const errDiv = document.createElement('div');
+                errDiv.className = 'text-red-500 text-sm mt-2';
+                errDiv.textContent = `通信错误: ${err.message}`;
+                turnContainer.appendChild(errDiv);
+            } finally {
+                isReceiving = false;
+                sendBtn.disabled = false;
+                chatBox.scrollTop = chatBox.scrollHeight;
+            }
+        }
+    </script>
+</body>
+</html>

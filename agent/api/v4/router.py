@@ -1,11 +1,12 @@
 import json
 import os
-from fastapi import APIRouter, Request
+from fastapi import APIRouter, Request, Header
 from fastapi.responses import HTMLResponse, StreamingResponse
 from fastapi.templating import Jinja2Templates
 from pydantic import BaseModel
+from typing import List, Dict, Optional
 
-from services.agent import react_stream_chat as stream_chat
+from services.agent import react_stream_chat
 
 router = APIRouter()
 templates = Jinja2Templates(directory="templates")
@@ -28,11 +29,11 @@ def save_config(config_data):
         json.dump(config_data, f, indent=2, ensure_ascii=False)
 
 @router.get("/", response_class=HTMLResponse)
-async def get_v3_page(request: Request):
+async def get_v4_page(request: Request):
     config = load_config()
     return templates.TemplateResponse(
         request=request, 
-        name="v3/index.html", 
+        name="v4/index.html", 
         context={"config": config}
     )
 
@@ -53,8 +54,7 @@ async def chat_endpoint(req: ChatRequest):
     config = load_config()
     messages_list = [{"role": msg.role, "content": msg.content} for msg in req.messages]
     return StreamingResponse(
-        stream_chat(messages_list, config),
+        react_stream_chat(messages_list, config),
         media_type="text/event-stream",
         headers={"Cache-Control": "no-cache", "Connection": "keep-alive"}
     )
-

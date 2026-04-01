@@ -21,7 +21,8 @@ class DocumentStore:
         
         # Populate Phase 2 embedding store if needed
         if not skip_embedding:
-            vec_store.add_document(id, parsed["text"], doc.title)
+            # Use chunks from HTML boundaries for RAG instead of character splitting
+            vec_store.add_document_from_html(id, html_content, doc.title)
         
         return doc
 

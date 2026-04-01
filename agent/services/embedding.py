@@ -4,6 +4,7 @@ from sentence_transformers import SentenceTransformer
 from typing import List, Dict, Any
 import pickle
 import os
+from services.html_parser import get_logical_chunks
 
 # Model configuration
 MODEL_NAME = 'BAAI/bge-small-zh-v1.5'
@@ -52,7 +53,27 @@ class VectorStore:
         self.doc_metadata: Dict[str, Dict[str, Any]] = {}
 
     def add_document(self, id: str, text: str, title: str = ""):
+        """Fallback method for plain text adds."""
         chunks = chunk_text(text)
+        self._add_chunks(id, chunks, title)
+
+    def add_document_from_html(self, id: str, html_content: str, title: str = ""):
+        """Primary method for SOP adding with logical boundaries."""
+        chunks = get_logical_chunks(html_content)
+        if not chunks:
+            # Fallback to plain text if HTML chunking fails
+            from services.html_parser import parse_html
+            parsed = parse_html(html_content)
+            self.add_document(id, parsed["text"], title)
+            return
+
+        # Prepend title to each chunk for better contextual retrieval if title is provided
+        if title:
+            chunks = [f"【{title}】\n{c}" for c in chunks]
+            
+        self._add_chunks(id, chunks, title)
+
+    def _add_chunks(self, id: str, chunks: List[str], title: str = ""):
         if not chunks:
             return
         self.doc_chunks[id] = chunks
@@ -60,7 +81,6 @@ class VectorStore:
         
         # Batch encode chunks
         model = get_model()
-        # SentenceTransformers encode returns numpy arrays by default
         embeddings = model.encode(chunks, normalize_embeddings=True)
         self.doc_embeddings[id] = embeddings
 

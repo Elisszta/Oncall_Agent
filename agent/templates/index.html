@@ -176,6 +176,25 @@
             h1 { font-size: 2.5rem; }
             .grid { grid-template-columns: 1fr; }
         }
+
+        /* SOP Search card: indigo accent (inherits default --primary) */
+        .card-search:hover { border-color: #6366f1; }
+        .card-search::before { background: linear-gradient(135deg, #6366f1, #818cf8); }
+
+        /* Agent card: purple accent */
+        .card-agent:hover { border-color: #9333ea; }
+        .card-agent::before { background: linear-gradient(135deg, #9333ea, #c084fc); }
+        .phase-agent {
+            background: rgba(147, 51, 234, 0.2);
+            color: #c084fc;
+        }
+        .btn-agent { color: #c084fc; }
+        .card-agent:hover .btn-agent { transform: translateX(4px); }
+
+        /* Force 2-column on wider screens for just 2 cards */
+        @media (min-width: 640px) {
+            .grid { grid-template-columns: repeat(2, 1fr); }
+        }
     </style>
 </head>
 <body>
@@ -186,31 +205,21 @@
         </header>
 
         <main class="grid">
-            <a href="/v1/" class="card">
-                <span class="phase-tag">Phase 1</span>
-                <h2>基础检索</h2>
-                <p class="card-desc">基于关键词匹配的高性能文档搜索引擎，支持 HTML 深度解析与 Snippet 预览。</p>
+            <a href="/v2/" class="card card-search">
+                <span class="phase-tag">🔍 SOP 搜索</span>
+                <h2>语义文档检索</h2>
+                <p class="card-desc">基于向量嵌入与 Cross-Encoder 重排序的智能搜索引擎，精准理解口语化查询，快速定位相关 SOP 文档。</p>
                 <div class="btn">
                     进入搜索
                     <svg fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M14 5l7 7m0 0l-7 7m7-7H3"></path></svg>
                 </div>
             </a>
 
-            <a href="/v2/" class="card">
-                <span class="phase-tag">Phase 2</span>
-                <h2>语义搜索</h2>
-                <p class="card-desc">集成向量嵌入与 Cross-Encoder 重排序，理解口语化查询，支持冷启动加速。 </p>
-                <div class="btn">
-                    语义检索
-                    <svg fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M14 5l7 7m0 0l-7 7m7-7H3"></path></svg>
-                </div>
-            </a>
-
-            <a href="/v3/" class="card">
-                <span class="phase-tag">Phase 3</span>
-                <h2>智能 Agent</h2>
-                <p class="card-desc">基于 Tool Calling 的对话式助手，自主查阅 SOP 并通过 SSE 实时反馈全过程。</p>
-                <div class="btn">
+            <a href="/v4/" class="card card-agent">
+                <span class="phase-tag phase-agent">🤖 Agent 搜索</span>
+                <h2>ReAct 智能排障</h2>
+                <p class="card-desc">基于 ReAct 框架的自主排障 Agent，驱动工具调用查阅 SOP，实时展示完整推理链路 Thought → Action → Observation。</p>
+                <div class="btn btn-agent">
                     开始对话
                     <svg fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M14 5l7 7m0 0l-7 7m7-7H3"></path></svg>
                 </div>

@@ -7,6 +7,7 @@ from services.document_store import load_initial_data
 from api.v1.router import router as v1_router
 from api.v2.router import router as v2_router
 from api.v3.router import router as v3_router
+from api.v4.router import router as v4_router
 
 
 @asynccontextmanager
@@ -27,6 +28,7 @@ app.mount("/data", StaticFiles(directory="data", html=True), name="data")
 app.include_router(v1_router, prefix="/v1")
 app.include_router(v2_router, prefix="/v2")
 app.include_router(v3_router, prefix="/v3")
+app.include_router(v4_router, prefix="/v4")
 
 if __name__ == "__main__":
     import uvicorn
