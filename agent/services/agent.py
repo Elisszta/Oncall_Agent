@@ -5,14 +5,18 @@ from typing import List, Dict, Any, AsyncGenerator
 import numpy as np
 
 def _intercept_hallucination(fname: str) -> str:
+    import difflib
     from services.embedding import vec_store
-    known_files = set(vec_store.doc_metadata.keys())
+    known_files = list(vec_store.doc_metadata.keys())
     base = fname.replace(".html", "")
     if base not in known_files:
-        if vec_store.doc_embeddings:
-            results = vec_store.search(fname, top_k=1)
-            if results:
-                best = max(results.items(), key=lambda x: x[1])[0]
+        if known_files:
+            # Use string similarity (difflib) instead of vector search for filename matching.
+            # Filenames are short identifiers (e.g. "sop-001"), not semantic queries,
+            # so character-level similarity is far more appropriate here.
+            matches = difflib.get_close_matches(base, known_files, n=1, cutoff=0.0)
+            if matches:
+                best = matches[0]
                 return f"[INTERCEPT] 文件 {fname} 不存在。最相似的文档是 {best}.html，建议尝试调整参数调用。"
         return f"Error: 文件 {fname} 不存在。"
     return ""
@@ -215,22 +219,27 @@ async def react_stream_chat(
 
             tool_calls = {}
             has_tool_call = False
-            
-            # Since we must stream, we will just stream everything as 'thought'. If has_tool_call is False,
-            # that means the model decided to answer! We could have streamed it as 'message' if we knew!
-            # Since OpenAI streams content before tool_calls, we don't know if it will call a tool until the end!
-            
+
+            # We buffer all content chunks so that, at stream-end, we can determine
+            # retroactively whether the streamed text was an intermediate 'Thought'
+            # (model will call a tool) or the 'Final Answer' (model stops here).
+            # During streaming we optimistically show everything as 'thought';
+            # if it turns out to be the final answer we emit 'retract_thought' so
+            # the frontend can cleanly remove the transient thought bubble and
+            # render the answer properly as Markdown.
             assist_content = ""
+            content_buffer = []  # stores each raw delta for potential retraction
 
             async for chunk in stream:
                 if not chunk.choices:
                     continue
                 delta = chunk.choices[0].delta
-                
+
                 if delta.content:
                     assist_content += delta.content
+                    content_buffer.append(delta.content)
                     yield f'data: {json.dumps({"event": "thought", "delta": delta.content}, ensure_ascii=False)}\n\n'
-                
+
                 if delta.tool_calls:
                     has_tool_call = True
                     for tc in delta.tool_calls:
@@ -255,15 +264,20 @@ async def react_stream_chat(
                 stop_reason = chunk.choices[0].finish_reason
                 if stop_reason in ("stop", "length", "content_filter"):
                     if not has_tool_call:
-                        # Model finished its text response (normally, truncated, or filtered).
-                        # Whatever was streamed as 'thought' is the final answer.
-                        yield f'data: {json.dumps({"event": "message_finalized", "delta": ""})}\n\n'
+                        # ── Final Answer path ──────────────────────────────────────────
+                        # The content we streamed as 'thought' is actually the final reply.
+                        # 1. Tell the frontend to retract the transient thought bubble.
+                        # 2. Send message_finalized with the full buffered text so the
+                        #    frontend can render it as Markdown without relying on the
+                        #    (potentially stale) activeThoughtText variable.
+                        yield f'data: {json.dumps({"event": "retract_thought"}, ensure_ascii=False)}\n\n'
+                        yield f'data: {json.dumps({"event": "message_finalized", "full_text": assist_content}, ensure_ascii=False)}\n\n'
                         if stop_reason == "length":
                             yield f'data: {json.dumps({"event": "error", "detail": "⚠️ 模型回复因达到 Token 上限而被截断，内容可能不完整。"})}\n\n'
                         elif stop_reason == "content_filter":
                             yield f'data: {json.dumps({"event": "error", "detail": "⚠️ 模型回复被安全过滤器拦截，无法显示完整内容。"})}\n\n'
                         yield "data: [DONE]\n\n"
-                        return # Exit generator!
+                        return  # Exit generator!
 
             # Process tools if any
             if tool_calls:

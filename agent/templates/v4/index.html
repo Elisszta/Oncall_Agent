@@ -109,6 +109,15 @@
         let isReceiving = false;
         let messageHistory = [];
 
+        // Bug 2 fix: escape HTML special characters to prevent XSS / broken layout
+        function escapeHtml(str) {
+            return String(str)
+                .replace(/&/g, '&amp;')
+                .replace(/</g, '&lt;')
+                .replace(/>/g, '&gt;')
+                .replace(/"/g, '&quot;');
+        }
+
         function handleEnter(e) {
             if (e.key === 'Enter' && !e.shiftKey) {
                 e.preventDefault();
@@ -179,7 +188,9 @@
                 let partialChunk = "";
                 let fullAnswerText = "";
 
-                while (true) {
+                // Bug 4 fix: use a flag to correctly break the outer while loop on [DONE]
+                let streamDone = false;
+                while (!streamDone) {
                     const { done, value } = await reader.read();
                     if (done) break;
                     
@@ -190,7 +201,7 @@
                     for (const line of lines) {
                         if (!line.startsWith("data: ")) continue;
                         const dataStr = line.replace("data: ", "").trim();
-                        if (dataStr === "[DONE]") break;
+                        if (dataStr === "[DONE]") { streamDone = true; break; }
                         
                         try {
                             const data = JSON.parse(dataStr);
@@ -227,8 +238,8 @@
                                 header.innerHTML = `
                                     <div class="flex items-center gap-2 font-mono text-xs text-gray-400">
                                         <svg class="w-4 h-4 text-blue-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z"></path><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"></path></svg>
-                                        <span class="text-blue-300 font-semibold">${data.toolName}</span>
-                                        <span class="truncate max-w-[200px] opacity-70">${data.arguments}</span>
+                                        <span class="text-blue-300 font-semibold">${escapeHtml(data.toolName)}</span>
+                                        <span class="truncate max-w-[200px] opacity-70">${escapeHtml(data.arguments)}</span>
                                     </div>
                                     <div class="tool-spinner flex items-center">
                                         <svg class="w-4 h-4 animate-spin text-blue-500" fill="none" viewBox="0 0 24 24"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path></svg>
@@ -254,11 +265,32 @@
                                     activeToolDiv = null;
                                 }
                             }
+                            else if (data.event === "retract_thought") {
+                                // The content that was streaming as 'thought' is actually the
+                                // final answer. The backend has emitted this event so we cleanly
+                                // remove the transient thought bubble before rendering the answer.
+                                if (activeThoughtBlock && activeThoughtBlock.parentNode) {
+                                    activeThoughtBlock.parentNode.removeChild(activeThoughtBlock);
+                                }
+                                activeThoughtBlock = null;
+                                // activeThoughtText is preserved; message_finalized will use
+                                // data.full_text (buffered by backend) as the authoritative source.
+                            }
                             else if (data.event === "message_finalized") {
-                                // 1. Find all thought bubbles in this turn
+                                // Prefer data.full_text (buffered on backend, always complete)
+                                // over activeThoughtText (frontend accumulation, may be stale).
+                                const finalAnswerText = (data.full_text != null)
+                                    ? data.full_text
+                                    : activeThoughtText;
+                                // Safety: remove thought bubble if retract_thought wasn't received
+                                // (e.g. older server, or edge case where event was skipped).
+                                if (activeThoughtBlock && activeThoughtBlock.parentNode === turnContainer) {
+                                    turnContainer.removeChild(activeThoughtBlock);
+                                }
+
+                                // 1. Collect remaining thought bubbles (pre-tool-call reasoning only)
                                 const thoughts = turnContainer.querySelectorAll('.thought-bubble');
                                 if (thoughts.length > 0) {
-                                    // Group them into a collapsable container
                                     const thoughtWrapper = document.createElement('div');
                                     thoughtWrapper.className = 'border border-purple-500/30 bg-purple-900/10 rounded-lg mb-4 overflow-hidden';
                                     
@@ -269,13 +301,12 @@
                                             <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9.663 17h4.673M12 3v1m6.364 1.636l-.707.707M21 12h-1M4 12H3m3.343-5.657l-.707-.707m2.828 9.9a5 5 0 117.072 0l-.548.547A3.374 3.374 0 0014 18.469V19a2 2 0 11-4 0v-.531c0-.895-.356-1.754-.988-2.386l-.548-.547z"></path></svg>
                                             推理过程 (Thought Process)
                                         </span>
-                                        <svg class="w-3.5 h-3.5 transition-transform duration-300" style="transform: rotate(180deg)" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"></path></svg>
+                                        <svg class="w-3.5 h-3.5 transition-transform duration-300" style="transform: rotate(0deg)" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"></path></svg>
                                     `;
                                     
                                     const thoughtBody = document.createElement('div');
-                                    thoughtBody.className = 'p-1 bg-black/20'; // Keep it hidden by default if preferred, but usually users want it collapsed after answer
+                                    thoughtBody.className = 'p-1 bg-black/20 hidden'; // collapsed by default
                                     
-                                    // Move thoughts inside
                                     thoughts.forEach(t => {
                                         t.classList.remove('mb-2');
                                         t.classList.add('my-1', 'bg-transparent', 'border-none', 'shadow-none');
@@ -287,25 +318,27 @@
                                         thoughtBody.classList.toggle('hidden');
                                         thoughtHeader.querySelector('svg:last-child').style.transform = isHidden ? 'rotate(180deg)' : 'rotate(0deg)';
                                     };
-                                    
-                                    // Default to collapsed after finalized
-                                    thoughtBody.classList.add('hidden');
-                                    thoughtHeader.querySelector('svg:last-child').style.transform = 'rotate(0deg)';
 
                                     thoughtWrapper.appendChild(thoughtHeader);
                                     thoughtWrapper.appendChild(thoughtBody);
                                     
-                                    // Insert wrap at the beginning of the turn (or where the first thought was)
-                                    turnContainer.insertBefore(thoughtWrapper, turnContainer.firstChild.nextSibling);
+                                    // Bug 5 fix: robustly insert thoughtWrapper right after the avatar
+                                    // element (firstChild), before any tool-call cards.
+                                    const avatarEl = turnContainer.firstChild;
+                                    if (avatarEl && avatarEl.nextSibling) {
+                                        turnContainer.insertBefore(thoughtWrapper, avatarEl.nextSibling);
+                                    } else {
+                                        turnContainer.appendChild(thoughtWrapper);
+                                    }
                                 }
 
-                                // 2. Add final answer
+                                // 2. Add final answer (uses finalAnswerText, not the reset activeThoughtText)
                                 const finalAnsDiv = document.createElement('div');
                                 finalAnsDiv.className = 'mt-2 text-gray-200 text-sm leading-relaxed markdown-body animate-in fade-in slide-in-from-bottom-2 duration-500';
-                                finalAnsDiv.innerHTML = marked.parse(activeThoughtText);
+                                finalAnsDiv.innerHTML = marked.parse(finalAnswerText || '（模型未返回文本内容）');
                                 turnContainer.appendChild(finalAnsDiv);
                                 
-                                fullAnswerText = activeThoughtText;
+                                fullAnswerText = finalAnswerText;
                                 activeThoughtBlock = null;
                                 chatBox.scrollTop = chatBox.scrollHeight;
                             }
@@ -314,6 +347,11 @@
                                 errDiv.className = 'text-red-400 text-sm mt-3 bg-red-900/20 py-2 px-3 border border-red-900/50 rounded-lg';
                                 errDiv.textContent = `Warning: ${data.detail || data.delta}`;
                                 turnContainer.appendChild(errDiv);
+                                // Bug 6 fix: on loop_limit, push a placeholder assistant message so
+                                // subsequent turns don't lose conversation context.
+                                if (data.event === "loop_limit") {
+                                    messageHistory.push({ role: 'assistant', content: '[推理步数达到上限，本次对话未能完成最终回答]' });
+                                }
                             }
                         } catch (err) {
                             console.error("Parse JSON stream error:", err, dataStr);
